@@ -1,0 +1,10 @@
+# MacOS
+.DS_Store
+
+# LabVIEW
+*.lvlps
+*.aliases
+.*.UserState/
+
+# Rust / LabVIEW build output
+target/
