@@ -259,10 +259,14 @@ bug, it failing to unload is actually macOS doing the right thing …
 `dlclose` is just not really coherent in programs which have thread
 local storage."*
 
-### Possible fixes (framework-side)
+### Possible fixes (require a change in LabVIEW itself)
 
-The fix needs to live inside the LabVIEW framework. Plausible shapes,
-in decreasing order of robustness:
+The fix needs to be a change inside **LabVIEW** — specifically, in the
+shared-library runtime that the LabVIEW build process bakes into every
+macOS `.framework` it produces. No host-side change (Rust, C, Swift, or
+otherwise) can substitute for this; the broken atexit / destructor
+behaviour lives inside NI-shipped code that runs after the host's
+`main` returns. Plausible fix shapes, in decreasing order of robustness:
 
 1. **Make the destructors thread-safe** — have each destructor first
    quiesce or join the LabVIEW runtime threads it shares state with,
