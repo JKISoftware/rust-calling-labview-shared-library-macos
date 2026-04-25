@@ -118,6 +118,92 @@ Or run all four modes in sequence with the bundled demo script:
 ./demo.sh
 ```
 
+Sample output from one such run (absolute paths abbreviated):
+
+```
+========================================================================
+=== default — no workaround (expect SIGSEGV, exit 139)
+========================================================================
+OS:           macos (aarch64)
+Framework:    .../target/labview/SharedLib.framework/Versions/A/SharedLib
+Loaded OK (libloading)
+
+LabVIEW caught fatal signal
+26.1f0 - Received SIGSEGV
+Reason: invalid permissions for mapped object
+Attempt to reference address: 0x8
+Increment(0) = 1 (expected 1) [OK]
+Increment(1) = 2 (expected 2) [OK]
+Increment(5) = 6 (expected 6) [OK]
+Increment(41) = 42 (expected 42) [OK]
+Increment(-1) = 0 (expected 0) [OK]
+./demo.sh: line 13: 11797 Segmentation fault: 11  "$bin"
+EXIT CODE: 139
+
+========================================================================
+=== WORKAROUND=forget — skip Library::drop dlclose (expect 139)
+========================================================================
+OS:           macos (aarch64)
+Framework:    .../target/labview/SharedLib.framework/Versions/A/SharedLib
+Workaround:   forget
+Loaded OK (libloading)
+
+LabVIEW caught fatal signal
+26.1f0 - Received SIGSEGV
+Reason: invalid permissions for mapped object
+Attempt to reference address: 0x8
+Increment(0) = 1 (expected 1) [OK]
+Increment(1) = 2 (expected 2) [OK]
+Increment(5) = 6 (expected 6) [OK]
+Increment(41) = 42 (expected 42) [OK]
+Increment(-1) = 0 (expected 0) [OK]
+std::mem::forget(library) — skipping Library::drop
+./demo.sh: line 13: 11808 Segmentation fault: 11  WORKAROUND="$mode" "$bin"
+EXIT CODE: 139
+
+========================================================================
+=== WORKAROUND=nodelete — RTLD_NODELETE (expect 139)
+========================================================================
+OS:           macos (aarch64)
+Framework:    .../target/labview/SharedLib.framework/Versions/A/SharedLib
+Workaround:   nodelete
+dlopen flags: RTLD_NOW | RTLD_NODELETE (0x82)
+Loaded OK (libc::dlopen)
+
+LabVIEW caught fatal signal
+26.1f0 - Received SIGSEGV
+Reason: invalid permissions for mapped object
+Attempt to reference address: 0x8
+Increment(0) = 1 (expected 1) [OK]
+Increment(1) = 2 (expected 2) [OK]
+Increment(5) = 6 (expected 6) [OK]
+Increment(41) = 42 (expected 42) [OK]
+Increment(-1) = 0 (expected 0) [OK]
+dlclose returned
+./demo.sh: line 13: 11812 Segmentation fault: 11  WORKAROUND="$mode" "$bin"
+EXIT CODE: 139
+
+========================================================================
+=== WORKAROUND=exit — libc::_exit, skip destructors (expect 0)
+========================================================================
+OS:           macos (aarch64)
+Framework:    .../target/labview/SharedLib.framework/Versions/A/SharedLib
+Workaround:   exit
+Loaded OK (libloading)
+
+LabVIEW caught fatal signal
+26.1f0 - Received SIGSEGV
+Reason: invalid permissions for mapped object
+Attempt to reference address: 0x8
+Increment(0) = 1 (expected 1) [OK]
+Increment(1) = 2 (expected 2) [OK]
+Increment(5) = 6 (expected 6) [OK]
+Increment(41) = 42 (expected 42) [OK]
+Increment(-1) = 0 (expected 0) [OK]
+Exiting via libc::_exit(0)
+EXIT CODE: 0
+```
+
 The fact that `forget` and `nodelete` both still produce SIGSEGV 139
 and `exit` produces a clean 0 localises the crash precisely: it lives
 in the post-`dlclose` process-exit cleanup path that runs `atexit`
