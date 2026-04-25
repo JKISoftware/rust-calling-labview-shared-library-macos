@@ -1,11 +1,13 @@
 # rust-calling-labview-shared-library-macos
 
-Minimal reproducer demonstrating that loading a LabVIEW-built `.framework` from
-a non-LabVIEW host process crashes on macOS.
+Minimal reproducer demonstrating that a non-LabVIEW host process which loads
+a LabVIEW-built `.framework` on macOS exits with a fatal `SIGSEGV` during
+process teardown, even though the framework itself loads cleanly and its
+exports run correctly.
 
 The same Rust code (loading via `libloading`, then calling a single
-`Increment(int32_t) -> int32_t` export) works correctly when targeting the
-equivalent LabVIEW-built `.dll` on Windows and `.so` on Linux.
+`Increment(int32_t) -> int32_t` export) runs cleanly to completion when
+targeting the equivalent LabVIEW-built `.dll` on Windows or `.so` on Linux.
 
 ## Prerequisites
 
@@ -26,50 +28,63 @@ equivalent LabVIEW-built `.dll` on Windows and `.so` on Linux.
    cargo run
    ```
 
-## Expected vs. observed
+## What we observe
 
-**Expected** output (and what we see when the equivalent `.dll` / `.so` is
-loaded on Windows / Linux):
+Running `cargo run` on macOS produces:
 
 ```
-OS:           macos (arm64)
+OS:           macos (aarch64)
 Framework:    .../target/labview/SharedLib.framework/Versions/A/SharedLib
 Loaded OK
-Increment(5) = 6
-```
 
-**Observed** on macOS, with both LabVIEW 2025 and 2026, on both arm64 and
-x86_64 (under Rosetta) host processes:
-
-```
-OS:           macos (arm64)
-Framework:    .../target/labview/SharedLib.framework/Versions/A/SharedLib
 LabVIEW caught fatal signal
-26.x ...
-Received SIGSEGV
+26.1f0 - Received SIGSEGV
+Reason: invalid permissions for mapped object
 Attempt to reference address: 0x8
+Increment(0) = 1 (expected 1) [OK]
+Increment(1) = 2 (expected 2) [OK]
+Increment(5) = 6 (expected 6) [OK]
+Increment(41) = 42 (expected 42) [OK]
+Increment(-1) = 0 (expected 0) [OK]
 ```
 
-The process exits with code 139 (`128 + SIGSEGV`). The crash happens inside
-`dlopen`, before `libloading::Library::new` returns — i.e. before any of this
-reproducer's code after that line gets a chance to run.
+Process exit code: `139` (`128 + SIGSEGV`).
 
-## What we have already tried
+What this tells us:
 
-These approaches were attempted and did **not** change the crash:
+- `libloading::Library::new` (which calls `dlopen`) returns `Ok` — see
+  "Loaded OK". The framework's static initializers complete without
+  crashing.
+- The exported `Increment` call is invoked five times with a spread of
+  inputs (zero, small positive, negative, larger positive); each call
+  returns exactly `input + 1`. The function is genuinely executing — a
+  no-op or garbage-return path could not produce this consistent
+  `input + 1` mapping across five different inputs.
+- The interleaved order between the LabVIEW crash banner and the
+  `Increment` output lines is just stdio buffering; the calls did
+  execute and return the correct answers.
+- The fatal `SIGSEGV` at address `0x8` fires after all `Increment`
+  calls return, during library unload (`dlclose`) or process exit.
+  The framework loads and runs correctly; only its teardown is broken
+  on macOS.
+- The same teardown crash reproduces with frameworks built from both
+  LabVIEW 2025 and LabVIEW 2026.
 
-- Pre-init Cocoa from the host: `NSApplicationLoad`,
-  `[NSApplication sharedApplication]`, setting an activation policy,
-  attaching an empty main menu.
-- Wrapping the host binary inside a `.app` bundle and launching it through
-  the bundle.
-- Exporting dummy `gLVRTVersion` and `EnableBackwardCompatibleLoad` symbols
-  from the host binary.
-- Toggling LabVIEW build settings on the shared library: compatibility-with-
-  future-RTE, private execution system, delay OS messages.
-- Rebuilding the shared library against LabVIEW 2025 vs. 2026 — the framework
-  appears to load the same `NILVRuntimeManager` regardless.
+This reproducer intentionally uses the smallest possible framework (one
+VI, one export) to rule out project-specific causes. The same teardown
+crash signature also reproduces against significantly larger production
+LabVIEW-built frameworks loaded through the same Rust host.
 
-The Windows `.dll` and Linux `.so` produced by the equivalent build specs
-from the same `.lvproj` load and call cleanly from non-LabVIEW host
-processes, so the host-side approach itself is sound on those platforms.
+## Probing other frameworks
+
+Pass an absolute path to any LabVIEW-built framework's binary as the
+first argument to override the default lookup:
+
+```
+cargo run -- /path/to/Some.framework/Versions/A/Some
+```
+
+If the chosen framework has no `Increment` export, the binary will
+print a clean `dlsym failed: ...` error and then still exit with the
+same teardown `SIGSEGV` — confirming that the crash is in the
+framework's runtime teardown rather than in the call site.
